@@ -1,0 +1,1165 @@
+import ttkbootstrap as ttk
+from ttkbootstrap.dialogs import Messagebox
+from ttkbootstrap.constants import *
+from ttkbootstrap.tooltip import ToolTip
+
+import tkinter as tk
+from tkinter import font
+from tkinter.scrolledtext import *
+from tkinter import Listbox
+from tkinter import messagebox
+
+from inspect import currentframe
+from threading import Thread
+
+import csv
+import requests
+import threading
+import time
+import json
+import re
+import datetime
+import asyncio
+import sys
+import os
+
+from PIL import Image, ImageTk
+
+url = "http://109.123.230.108:80"
+
+authenticated_email = None
+stop_heartbeat = False
+data_trade_active = None
+data_trade_history = None
+updating_programmatically = False
+
+icon_file = "assets/icon.ico"
+
+def show_root_screen():
+    def on_close():
+        global stop_heartbeat
+        stop_heartbeat = True
+        root.destroy()
+        os._exit(0)
+
+    def simplify_error_message(error_message):
+        match = re.search(r'with url: (/[^?]*)(\?|$)', error_message)
+        path = match.group(1) if match else 'Unknown path'
+        simplified_error = f"Error occurred while hitting endpoint: {path}"
+        return simplified_error
+
+    def validate_float_input(P):
+        if P == "":
+            return True
+        try:
+            float_value = float(P)
+            if len(P.split('.')[-1]) <= 6:
+                return True
+            else:
+                return False
+        except ValueError:
+            return False
+
+    def validate_integer_input(P):
+        if P == "":
+            return True
+        try:
+            int_value = int(P)
+            return True
+        except ValueError:
+            return False
+
+    def calculate_total_pnl(data_trade_history):
+        total_pnl = 0.0
+        for item in data_trade_history:
+            total_pnl += float(item[9])
+        return total_pnl
+
+    root = ttk.Toplevel()
+    root.title('AlgoTech Client Dashboard')
+    root.resizable(False, False)
+    root.iconbitmap(bitmap=icon_file)
+    root.iconbitmap(default=icon_file)
+    app_width = 1450
+    app_height = 800
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    x = (screen_width / 2) - (app_width / 2)
+    y = (screen_height / 2) - (app_height / 2)
+    root.geometry(f'{app_width}x{app_height}+{int(x)}+{int(y)}')
+    root.protocol('WM_DELETE_WINDOW', on_close)
+
+    logo_icon = Image.open("assets/512x512.png")
+    logo_icon = logo_icon.resize((35, 35), Image.ANTIALIAS)
+    logo_icon = ImageTk.PhotoImage(logo_icon)
+
+    trade_icon_active = Image.open("assets/trade_active.png")
+    trade_icon_active = trade_icon_active.resize((20, 20), Image.ANTIALIAS)
+    trade_icon_active = ImageTk.PhotoImage(trade_icon_active)
+
+    trade_icon_inactive = Image.open("assets/trade_inactive.png")
+    trade_icon_inactive = trade_icon_inactive.resize((20, 20), Image.ANTIALIAS)
+    trade_icon_inactive = ImageTk.PhotoImage(trade_icon_inactive)
+
+    history_icon_active = Image.open("assets/hourglass_active.png")
+    history_icon_active = history_icon_active.resize((20, 20), Image.ANTIALIAS)
+    history_icon_active = ImageTk.PhotoImage(history_icon_active)
+
+    history_icon_inactive = Image.open("assets/hourglass_inactive.png")
+    history_icon_inactive = history_icon_inactive.resize((20, 20), Image.ANTIALIAS)
+    history_icon_inactive = ImageTk.PhotoImage(history_icon_inactive)
+
+    coin_setup_icon_active = Image.open("assets/gear_active.png")
+    coin_setup_icon_active = coin_setup_icon_active.resize((20, 20), Image.ANTIALIAS)
+    coin_setup_icon_active = ImageTk.PhotoImage(coin_setup_icon_active)
+
+    coin_setup_icon_inactive = Image.open("assets/gear_inactive.png")
+    coin_setup_icon_inactive = coin_setup_icon_inactive.resize((20, 20), Image.ANTIALIAS)
+    coin_setup_icon_inactive = ImageTk.PhotoImage(coin_setup_icon_inactive)
+
+    style = ttk.Style()
+    style.configure("Navbar.TFrame", background="#FFFFFF")
+
+    navbar = ttk.Frame(root, style="Navbar.TFrame")
+    navbar.pack(side="top", fill="x")
+
+    style.configure("Dashboard.TLabel", background="#FFFFFF")
+
+    dashboard_label = ttk.Label(navbar, text="   Dashboard", image=logo_icon, compound="left",
+                                font=('Helvetica', 14, 'bold'), style="Dashboard.TLabel")
+    dashboard_label.pack(side="left", padx=20, pady=20)
+
+    def update_checkbutton_text(*args):
+        if not turn_onoff_var.get():
+            turn_onoff_check.configure(text="Trading: Off")
+            bot_running_status_user = False
+        else:
+            turn_onoff_check.configure(text="Trading: On")
+            bot_running_status_user = True
+
+        if not updating_programmatically:
+            try:
+                email = authenticated_email
+                data = {'email': email, 'bot_running_status_user': bot_running_status_user}
+                response = requests.post(f'{url}/update_bot_running_status_user', json=data)
+                server_response = response.json()
+                if server_response['status'] == 'success':
+                    messagebox.showinfo('Success', f'Bot running status successfully updated to {bot_running_status_user}')
+                else:
+                    if server_response['message'] == 'License key expired':
+                        messagebox.showerror('Error', f'There was an error updating the bot running status: {server_response["message"]}')
+                    else:
+                        messagebox.showerror('Error',
+                                             f'There was an error updating the bot running status: {server_response["message"]}')
+            except Exception as e:
+                print(f"Error updating bot running status for user: {e}")
+                messagebox.showerror('Error', {e})
+
+    turn_onoff_var = ttk.BooleanVar(value=True)
+    turn_onoff_check = ttk.Checkbutton(navbar, text="Trading: On", variable=turn_onoff_var, bootstyle="success-round-toggle")
+    turn_onoff_check.pack(side="right", padx=20, pady=20)
+
+    turn_onoff_var.trace("w", update_checkbutton_text)
+
+    tt_turn_onoff_check = ToolTip(turn_onoff_check, text='Toggle trading', bootstyle=(SUCCESS, INVERSE))
+
+    style.configure("Sidebar.TFrame", background="#FFFFFF")
+
+    sidebar = ttk.Frame(root, style="Sidebar.TFrame")
+    sidebar.pack(side="left", fill="y")
+
+    main_content = ttk.Frame(root)
+    main_content.pack(side="right", fill="both", expand=True)
+    root.columnconfigure(0, weight=1)
+
+    current_page = 0
+    items_per_page = 5
+
+    def on_enter_box(event, box_label_widgets):
+        event.widget.configure(style="HoveredPositionBox.TFrame")
+        for widget in box_label_widgets:
+            widget.configure(background="#EBEBEB")
+
+    def on_leave_box(event, box_label_widgets):
+        event.widget.configure(style="PositionBox.TFrame")
+        for widget in box_label_widgets:
+            widget.configure(background="#FFFFFF")
+
+    style.configure("PositionBox.TFrame", background="#FFFFFF")
+
+    style.configure("HoveredPositionBox.TFrame", background="#EBEBEB")
+
+    trade_frame = ttk.Frame(main_content)
+    trade_frame_label = ttk.Label(trade_frame, text="Active Position (N/A)", font=('Helvetica', 12, 'bold'))
+    trade_frame_label.grid(row=0, column=0, sticky="w", pady=20, padx=20)
+
+    trade_column_frame = ttk.Frame(trade_frame, padding=10)
+    trade_column_frame.grid(row=1, column=0, padx=40, pady=10, sticky="ew")
+    trade_column_frame.columnconfigure(0, weight=1)
+
+    for i in range(7):
+        trade_column_frame.columnconfigure(i, weight=1)
+
+    trade_column_id = ttk.Label(trade_column_frame, text="ID", background="#FFFFFF", foreground="#696B6D", font=('Helvetica', 10), width=5)
+    trade_column_id.grid(row=0, column=0, sticky="NSEW")
+
+    trade_column_symbol = ttk.Label(trade_column_frame, text="Symbol", background="#FFFFFF", foreground="#696B6D", font=('Helvetica', 10), width=15)
+    trade_column_symbol.grid(row=0, column=1, padx=(10, 0), sticky="w")
+
+    trade_column_side = ttk.Label(trade_column_frame, text="Side", background="#FFFFFF", foreground="#696B6D", font=('Helvetica', 10), width=10)
+    trade_column_side.grid(row=0, column=2, padx=(10, 0), sticky="w")
+
+    trade_column_price = ttk.Label(trade_column_frame, text="Avg. Price", background="#FFFFFF", foreground="#696B6D", font=('Helvetica', 10), width=10)
+    trade_column_price.grid(row=0, column=3, padx=(10, 0), sticky="w")
+
+    trade_column_amt = ttk.Label(trade_column_frame, text="Amount", background="#FFFFFF", foreground="#696B6D", font=('Helvetica', 10), width=10)
+    trade_column_amt.grid(row=0, column=4, padx=(10, 0), sticky="w")
+
+    trade_column_pnl = ttk.Label(trade_column_frame, text="PnL", background="#FFFFFF", foreground="#696B6D", font=('Helvetica', 10), width=15)
+    trade_column_pnl.grid(row=0, column=5, padx=(10, 0), sticky="w")
+
+    position_box_frame = ttk.Frame(trade_frame)
+    position_box_frame.grid(row=2, column=0, padx=20, pady=10, sticky="NSEW")
+
+    box = ttk.Frame(position_box_frame, relief="flat", borderwidth=10, padding=10, style="PositionBox.TFrame")
+    box.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
+    box.columnconfigure(0, weight=1)
+
+    # dummy_position = ("1", "BTC", "Buy", "50000", "1", "60000", "40000")
+
+    def update_trade_box():
+        if data_trade_active is not None:
+            for child in box.winfo_children():
+                child.destroy()
+
+            position_data = data_trade_active
+
+            box_label_widgets = []
+
+            for j in range(7):
+                box.columnconfigure(j, weight=1)
+
+            trade_label1 = ttk.Label(box, text="0", background="#FFFFFF", font=('Helvetica', 10, 'bold'),
+                                     width=5)
+            trade_label1.grid(row=0, column=0, sticky="w")
+            box_label_widgets.append(trade_label1)
+
+            trade_label2 = ttk.Label(box, text=position_data[0], background="#FFFFFF", font=('Helvetica', 10, 'bold'),
+                                     width=15)
+            trade_label2.grid(row=0, column=1, padx=(10, 0), sticky="w")
+            box_label_widgets.append(trade_label2)
+
+            side_color = "#00FF00" if position_data[1] == "LONG" else "#FF0000"
+            trade_label3 = ttk.Label(box, text=position_data[1], foreground=side_color, background="#FFFFFF",
+                                     font=('Helvetica', 10, 'bold'), width=10)
+            trade_label3.grid(row=0, column=2, padx=(10, 0), sticky="w")
+            box_label_widgets.append(trade_label3)
+
+            trade_label4 = ttk.Label(box, text=position_data[2], background="#FFFFFF", font=('Helvetica', 10, 'bold'),
+                                     width=10)
+            trade_label4.grid(row=0, column=3, padx=(10, 0), sticky="w")
+            box_label_widgets.append(trade_label4)
+
+            trade_label5 = ttk.Label(box, text=position_data[3], background="#FFFFFF", font=('Helvetica', 10, 'bold'),
+                                     width=10)
+            trade_label5.grid(row=0, column=4, padx=(10, 0), sticky="w")
+            box_label_widgets.append(trade_label5)
+
+            trade_label6 = ttk.Label(box, text=position_data[4], background="#FFFFFF", font=('Helvetica', 10, 'bold'),
+                                     width=15)
+            trade_label6.grid(row=0, column=5, padx=(10, 0), sticky="w")
+            box_label_widgets.append(trade_label6)
+
+            box.bind("<Enter>", lambda event, blw=box_label_widgets: on_enter_box(event, blw))
+            box.bind("<Leave>", lambda event, blw=box_label_widgets: on_leave_box(event, blw))
+
+            trade_frame_label_text = "Active Position ({})".format((position_data[0]))
+            trade_frame_label.config(text=trade_frame_label_text)
+        else:
+            for child in box.winfo_children():
+                child.destroy()
+
+            trade_frame_label_text = "Active Position (N/A)"
+            trade_frame_label.config(text=trade_frame_label_text)
+
+    # box_label_widgets = []
+    #
+    # for j in range(7):
+    #     box.columnconfigure(j, weight=1)
+    #
+    # trade_label1 = ttk.Label(box, text=dummy_position[0], background="#FFFFFF", font=('Helvetica', 10, 'bold'), width=10)
+    # trade_label1.grid(row=0, column=0, sticky="w")
+    # box_label_widgets.append(trade_label1)
+    #
+    # trade_label2 = ttk.Label(box, text=dummy_position[1], background="#FFFFFF", font=('Helvetica', 10, 'bold'), width=10)
+    # trade_label2.grid(row=0, column=1, padx=(10, 0), sticky="w")
+    # box_label_widgets.append(trade_label2)
+    #
+    # side_color = "#00FF00" if dummy_position[2] == "Buy" else "#FF0000"
+    # trade_label3 = ttk.Label(box, text=dummy_position[2], foreground=side_color, background="#FFFFFF",
+    #                    font=('Helvetica', 10, 'bold'), width=10)
+    # trade_label3.grid(row=0, column=2, padx=(10, 0), sticky="w")
+    # box_label_widgets.append(trade_label3)
+    #
+    # trade_label4 = ttk.Label(box, text=dummy_position[3], background="#FFFFFF", font=('Helvetica', 10, 'bold'),
+    #                    width=10)
+    # trade_label4.grid(row=0, column=3, padx=(10, 0), sticky="w")
+    # box_label_widgets.append(trade_label4)
+    #
+    # trade_label5 = ttk.Label(box, text=dummy_position[4], background="#FFFFFF", font=('Helvetica', 10, 'bold'), width=10)
+    # trade_label5.grid(row=0, column=4, padx=(10, 0), sticky="w")
+    # box_label_widgets.append(trade_label5)
+    #
+    # trade_label6 = ttk.Label(box, text=dummy_position[5], background="#FFFFFF", font=('Helvetica', 10, 'bold'), width=10)
+    # trade_label6.grid(row=0, column=5, padx=(10, 0), sticky="w")
+    # box_label_widgets.append(trade_label6)
+    #
+    # trade_label7 = ttk.Label(box, text=dummy_position[6], background="#FFFFFF", font=('Helvetica', 10, 'bold'), width=10)
+    # trade_label7.grid(row=0, column=6, padx=(10, 0), sticky="w")
+    # box_label_widgets.append(trade_label7)
+    #
+    # box.bind("<Enter>", lambda event, blw=box_label_widgets: on_enter_box(event, blw))
+    # box.bind("<Leave>", lambda event, blw=box_label_widgets: on_leave_box(event, blw))
+
+    update_trade_box()
+
+    position_edit_button_frame = ttk.Frame(trade_frame)
+    position_edit_button_frame.grid(row=3, column=0, pady=10, padx=20, sticky='ew')
+
+    position_edit_button_frame.columnconfigure(0, weight=1)
+
+    def update_position_tpsl():
+        updated_take_profit = edit_take_profit_entry.get()
+        if not updated_take_profit:
+            messagebox.showerror('Error', 'You must enter a new Take Profit (in %)')
+            return
+
+        updated_stop_loss = edit_stop_loss_entry.get()
+        if not updated_stop_loss:
+            messagebox.showerror('Error', 'You must enter a new Stop Loss (in %)')
+            return
+
+        try:
+            email = authenticated_email
+            data = {'email': email, 'updated_take_profit': updated_take_profit, 'updated_stop_loss': updated_stop_loss}
+            response = requests.post(f'{url}/update_position_tpsl', json=data)
+            server_response = response.json()
+            if server_response['status'] == 'success':
+                messagebox.showinfo('Success', 'User position TP/SL updated successfully')
+            else:
+                if server_response['message'] == 'License key expired':
+                    messagebox.showerror('Error', f'There was an error updating the user position TP/SL: {server_response["message"]}')
+                else:
+                    messagebox.showerror('Error', f'There was an error updating the user position TP/SL: {server_response["message"]}')
+
+        except Exception as e:
+            print(f"Error updating user position TP/SL: {e}")
+            messagebox.showerror('Error', {e})
+
+    def close_position_by_user():
+        try:
+            email = authenticated_email
+            data = {'email': email}
+            response = requests.post(f'{url}/close_position_by_user', json=data)
+            server_response = response.json()
+            if server_response['status'] == 'success':
+                messagebox.showinfo('Success', 'User position closed successfully')
+            else:
+                if server_response['message'] == 'License key expired':
+                    messagebox.showerror('Error', f'There was an error closing the user position: {server_response["message"]}')
+                else:
+                    messagebox.showerror('Error', f'There was an error closing the user position: {server_response["message"]}')
+
+        except Exception as e:
+            print(f"Error closing user position: {e}")
+            messagebox.showerror('Error', {e})
+
+    edit_validate_float = trade_frame.register(validate_float_input)
+
+    edit_take_profit_entry = ttk.Entry(position_edit_button_frame, font=('Helvetica', 10), validate="key", validatecommand=(edit_validate_float, "%P"))
+    edit_take_profit_entry.grid(row=0, column=1, padx=10, sticky="w")
+
+    edit_stop_loss_entry = ttk.Entry(position_edit_button_frame, font=('Helvetica', 10), validate="key", validatecommand=(edit_validate_float, "%P"))
+    edit_stop_loss_entry.grid(row=0, column=2, padx=10, sticky="w")
+
+    edit_button = ttk.Button(position_edit_button_frame, text='Edit TP/SL', command=update_position_tpsl, bootstyle="secondary, outline-toolbutton")
+    edit_button.grid(row=0, column=3, padx=10, sticky='w')
+
+    close_button = ttk.Button(position_edit_button_frame, text='Close', command=close_position_by_user, bootstyle="danger, outline-toolbutton")
+    close_button.grid(row=0, column=4, padx=10, sticky='w')
+
+    tt_tp = ToolTip(edit_take_profit_entry, text='Enter your new Take Profit (in %)', bootstyle=(PRIMARY, INVERSE))
+    tt_sl = ToolTip(edit_stop_loss_entry, text='Enter your new Stop Loss (in %)', bootstyle=(PRIMARY, INVERSE))
+    tt_edit_btn = ToolTip(edit_button, text='Click to apply new Take Profit and Stop Loss values', bootstyle=(SECONDARY, INVERSE))
+    tt_close_btn = ToolTip(close_button, text='Click to close the current position', bootstyle=(DANGER, INVERSE))
+
+    history_frame = ttk.Frame(main_content)
+    history_frame_label = ttk.Label(history_frame, text="History Orders (0) | Total PnL (0 USDT)", font=('Helvetica', 12, 'bold'))
+    history_frame_label.grid(row=0, column=0, sticky="w", pady=20, padx=20)
+    # history_frame.columnconfigure(0, weight=1)
+    # history_frame.grid_rowconfigure(1, weight=1)
+
+    history_column_frame = ttk.Frame(history_frame, padding=10)
+    history_column_frame.grid(row=1, column=0, padx=40, pady=10, sticky="ew")
+    history_column_frame.columnconfigure(0, weight=1)
+
+    for i in range(7):
+        history_column_frame.columnconfigure(i, weight=1)
+
+    history_column_time = ttk.Label(history_column_frame, text="Time", background="#FFFFFF", foreground="#696B6D", font=('Helvetica', 10),
+                          width=20)
+    history_column_time.grid(row=0, column=0, sticky="NSEW")
+
+    history_column_id = ttk.Label(history_column_frame, text="ID", background="#FFFFFF", foreground="#696B6D", font=('Helvetica', 10),
+                          width=5)
+    history_column_id.grid(row=0, column=1, padx=(10, 0), sticky="w")
+
+    history_column_symbol = ttk.Label(history_column_frame, text="Symbol", background="#FFFFFF", foreground="#696B6D",
+                              font=('Helvetica', 10), width=15)
+    history_column_symbol.grid(row=0, column=2, padx=(10, 0), sticky="w")
+
+    history_column_side = ttk.Label(history_column_frame, text="Side", background="#FFFFFF", foreground="#696B6D",
+                            font=('Helvetica', 10), width=10)
+    history_column_side.grid(row=0, column=3, padx=(10, 0), sticky="w")
+
+    history_column_price = ttk.Label(history_column_frame, text="Avg. Price", background="#FFFFFF", foreground="#696B6D",
+                             font=('Helvetica', 10), width=10)
+    history_column_price.grid(row=0, column=4, padx=(10, 0), sticky="w")
+
+    history_column_amt = ttk.Label(history_column_frame, text="Amount", background="#FFFFFF", foreground="#696B6D",
+                           font=('Helvetica', 10), width=10)
+    history_column_amt.grid(row=0, column=5, padx=(10, 0), sticky="w")
+
+    history_column_tp = ttk.Label(history_column_frame, text="Take Profit", background="#FFFFFF", foreground="#696B6D", font=('Helvetica', 10),
+                          width=15)
+    history_column_tp.grid(row=0, column=6, padx=(10, 0), sticky="w")
+
+    history_column_sl = ttk.Label(history_column_frame, text="Stop Loss", background="#FFFFFF", foreground="#696B6D", font=('Helvetica', 10),
+                          width=15)
+    history_column_sl.grid(row=0, column=7, padx=(10, 0), sticky="w")
+
+    history_column_PNL = ttk.Label(history_column_frame, text="PnL", background="#FFFFFF", foreground="#696B6D",
+                                  font=('Helvetica', 10),
+                                  width=15)
+    history_column_PNL.grid(row=0, column=8, padx=(10, 0), sticky="w")
+
+    # items = [("2023-06-03 08:15:27", "1", "BTC", "Buy", "50000", "1", "52000", "48000", "6.75"),
+    #          ("2023-06-03 10:32:51", "2", "ETH", "Sell", "3000", "2", "3200", "2800", "5.66"),
+    #          ("2023-06-03 12:45:33", "3", "XRP", "Buy", "1.50", "10", "1.70", "1.30", "-3.54"),
+    #          ("2023-06-03 14:56:10", "4", "LTC", "Buy", "150", "5", "160", "140", "2.65"),
+    #          ("2023-06-03 16:23:49", "5", "ADA", "Sell", "2.50", "7", "2.80", "2.20", "8.12"),
+    #          ("2023-06-03 18:32:20", "6", "BNB", "Sell", "500", "3", "550", "450", "-7.51"),
+    #          ("2023-06-03 20:47:06", "7", "DOGE", "Buy", "0.35", "15", "0.40", "0.30", "14.87"),
+    #          ("2023-06-03 22:53:15", "8", "XLM", "Sell", "0.40", "6", "0.45", "0.35", "10.13")]
+
+    boxes_frame = ttk.Frame(history_frame)
+    boxes_frame.grid(row=2, column=0, padx=20, pady=10, sticky="NSEW")
+
+    def update_boxes():
+        if data_trade_history is not None:
+            nonlocal current_page
+
+            for child in boxes_frame.winfo_children():
+                child.destroy()
+
+            items = data_trade_history
+
+            start_index = current_page * items_per_page
+            end_index = start_index + items_per_page
+            items_for_page = items[start_index:end_index]
+
+            for i, item in enumerate(items_for_page):
+                box = ttk.Frame(boxes_frame, relief="flat", borderwidth=10, padding=10, style="PositionBox.TFrame")
+                box.grid(row=i, column=0, padx=10, pady=10, sticky="ew")
+                # boxes_frame.columnconfigure(0, weight=1)
+
+                box_label_widgets = []
+
+                for j in range(7):
+                    box.columnconfigure(j, weight=1)
+
+                timestamp_ms = int(item[1])
+                timestamp_sec = timestamp_ms / 1000
+
+                dt = datetime.datetime.fromtimestamp(timestamp_sec)
+                readable_time = dt.strftime('%Y-%m-%d %H:%M:%S')
+
+                history_label0 = ttk.Label(box, text=readable_time, background="#FFFFFF", font=('Helvetica', 10, 'bold'),
+                                           width=20)
+                history_label0.grid(row=0, column=0, sticky="w")
+                box_label_widgets.append(history_label0)
+
+                global_index = start_index + i
+                history_label1 = ttk.Label(box, text=global_index, background="#FFFFFF", font=('Helvetica', 10, 'bold'), width=5)
+                history_label1.grid(row=0, column=1, padx=(10, 0), sticky="w")
+                box_label_widgets.append(history_label1)
+
+                history_label2 = ttk.Label(box, text=item[3], background="#FFFFFF", font=('Helvetica', 10, 'bold'), width=15)
+                history_label2.grid(row=0, column=2, padx=(10, 0), sticky="w")
+                box_label_widgets.append(history_label2)
+
+                side_color = "#00FF00" if item[4] == "LONG" else "#FF0000"
+                history_label3 = ttk.Label(box, text=item[4], foreground=side_color, background="#FFFFFF",
+                                   font=('Helvetica', 10, 'bold'), width=10)
+                history_label3.grid(row=0, column=3, padx=(10, 0), sticky="w")
+                box_label_widgets.append(history_label3)
+
+                history_label4 = ttk.Label(box, text=item[5], background="#FFFFFF", font=('Helvetica', 10, 'bold'), width=10)
+                history_label4.grid(row=0, column=4, padx=(10, 0), sticky="w")
+                box_label_widgets.append(history_label4)
+
+                history_label5 = ttk.Label(box, text=item[6], background="#FFFFFF", font=('Helvetica', 10, 'bold'), width=10)
+                history_label5.grid(row=0, column=5, padx=(10, 0), sticky="w")
+                box_label_widgets.append(history_label5)
+
+                history_label6 = ttk.Label(box, text=item[7], background="#FFFFFF", font=('Helvetica', 10, 'bold'), width=15)
+                history_label6.grid(row=0, column=6, padx=(10, 0), sticky="w")
+                box_label_widgets.append(history_label6)
+
+                history_label7 = ttk.Label(box, text=item[8], background="#FFFFFF", font=('Helvetica', 10, 'bold'), width=15)
+                history_label7.grid(row=0, column=7, padx=(10, 0), sticky="w")
+                box_label_widgets.append(history_label7)
+
+                history_label8 = ttk.Label(box, text=item[9], background="#FFFFFF", font=('Helvetica', 10, 'bold'),
+                                           width=15)
+                history_label8.grid(row=0, column=8, padx=(10, 0), sticky="w")
+                box_label_widgets.append(history_label8)
+
+                box.bind("<Enter>", lambda event, blw=box_label_widgets: on_enter_box(event, blw))
+                box.bind("<Leave>", lambda event, blw=box_label_widgets: on_leave_box(event, blw))
+
+                total_pnl = calculate_total_pnl(data_trade_history)
+                history_frame_label_text = "History Orders ({}) | Total PnL ({} USDT)".format(len(items), total_pnl)
+                history_frame_label.config(text=history_frame_label_text)
+
+            # boxes_frame.columnconfigure(0, weight=1)
+
+            if current_page == 0:
+                prev_button.configure(state='disabled')
+            else:
+                prev_button.configure(state='normal')
+
+            if end_index >= len(items):
+                next_button.configure(state='disabled')
+            else:
+                next_button.configure(state='normal')
+
+    def next_page():
+        nonlocal current_page
+        current_page += 1
+        update_boxes()
+
+    def previous_page():
+        nonlocal current_page
+        if current_page > 0:
+            current_page -= 1
+            update_boxes()
+
+    pagination_frame = ttk.Frame(history_frame)
+    pagination_frame.grid(row=3, column=0, padx=10, pady=10, sticky='s')
+
+    prev_button = ttk.Button(pagination_frame, text="Previous", command=previous_page,
+                             bootstyle="primary, outline-toolbutton")
+    prev_button.pack(side="left", pady=10, padx=10)
+
+    next_button = ttk.Button(pagination_frame, text="Next", command=next_page, bootstyle="primary, outline-toolbutton")
+    next_button.pack(side="left", pady=10, padx=10)
+
+    update_boxes()
+
+    coin_setup_frame = ttk.Frame(main_content)
+    coin_setup_frame_label = ttk.Label(coin_setup_frame, text="Coin Setup", font=('Helvetica', 12, 'bold'))
+    coin_setup_frame_label.grid(row=0, column=0, sticky="w", pady=20, padx=20)
+
+    def save_coin_setup():
+        selected_coin = coin_treeview.focus()
+        if not selected_coin:
+            messagebox.showerror('Error', 'You must select a coin from the list')
+            return
+        selected_coin = coin_treeview.item(selected_coin)['values'][1]
+
+        margin_mode = margin_mode_var.get()
+        if not margin_mode:
+            messagebox.showerror('Error', 'You must select a Margin Mode')
+            return
+
+        position_cost = position_cost_entry.get()
+        if not position_cost:
+            messagebox.showerror('Error', 'You must enter a Position Cost (in %)')
+            return
+
+        take_profit = take_profit_entry.get()
+        if not take_profit:
+            messagebox.showerror('Error', 'You must enter a Take Profit (in %))')
+            return
+
+        stop_loss = stop_loss_entry.get()
+        if not stop_loss:
+            messagebox.showerror('Error', 'You must enter a Stop Loss (in %)')
+            return
+
+        leverage = leverage_entry.get()
+        if not leverage:
+            messagebox.showerror('Error', 'You must enter a Leverage')
+            return
+
+        try:
+            email = authenticated_email
+            data = {'email': email, 'coin': selected_coin, 'margin_mode': margin_mode, 'position_cost': position_cost,
+                    'takeprofit_pc': take_profit, 'stoploss_pc': stop_loss, 'leverage': leverage}
+            response = requests.post(f'{url}/update_user_coin_setup', json=data)
+            server_response = response.json()
+            if server_response['status'] == 'success':
+                messagebox.showinfo('Success', 'User coin setup updated successfully')
+            else:
+                if server_response['message'] == 'License key expired':
+                    messagebox.showerror('Error', f'There was an error updating the user coin setup: {server_response["message"]}')
+                else:
+                    messagebox.showerror('Error',
+                                         f'There was an error updating the user coin setup: {server_response["message"]}')
+        except Exception as e:
+            print(f"Error updating user coin setup: {e}")
+            messagebox.showerror('Error', {e})
+
+    def save_api_key():
+        coin_api_key = coin_api_key_entry.get()
+        if not coin_api_key:
+            messagebox.showerror('Error', 'You must enter API Key')
+            return
+
+        coin_api_secret_key = coin_api_secret_key_entry.get()
+        if not coin_api_secret_key:
+            messagebox.showerror('Error', 'You must enter API Secret Key')
+            return
+
+        try:
+            email = authenticated_email
+            data = {'email': email, 'api_key': coin_api_key, 'api_secret_key': coin_api_secret_key}
+            response = requests.post(f'{url}/update_user_api_key', json=data)
+            server_response = response.json()
+            if server_response['status'] == 'success':
+                messagebox.showinfo('Success', 'User API Key updated successfully')
+            else:
+                if server_response['message'] == 'License key expired':
+                    messagebox.showerror('Error', f'There was an error updating the user API Key: {server_response["message"]}')
+                else:
+                    messagebox.showerror('Error',
+                                         f'There was an error updating the user API Key: {server_response["message"]}')
+        except Exception as e:
+            print(f"Error updating user API Key: {e}")
+            messagebox.showerror('Error', {e})
+
+    coins = ['BTCUSDT', 'ETHUSDT', 'BCHUSDT', 'XRPUSDT', 'EOSUSDT', 'LTCUSDT', 'TRXUSDT', 'ETCUSDT', 'LINKUSDT', 'XLMUSDT', 'ADAUSDT', 'XMRUSDT', 'DASHUSDT', 'ZECUSDT', 'XTZUSDT', 'BNBUSDT', 'ATOMUSDT', 'ONTUSDT', 'IOTAUSDT', 'BATUSDT', 'VETUSDT', 'NEOUSDT', 'QTUMUSDT', 'IOSTUSDT', 'THETAUSDT', 'ALGOUSDT', 'ZILUSDT', 'KNCUSDT', 'ZRXUSDT', 'COMPUSDT', 'OMGUSDT', 'DOGEUSDT', 'SXPUSDT', 'KAVAUSDT', 'BANDUSDT', 'RLCUSDT', 'WAVESUSDT', 'MKRUSDT', 'SNXUSDT', 'DOTUSDT', 'DEFIUSDT', 'YFIUSDT', 'BALUSDT', 'CRVUSDT', 'TRBUSDT', 'RUNEUSDT', 'SUSHIUSDT', 'SRMUSDT', 'EGLDUSDT', 'SOLUSDT', 'ICXUSDT', 'STORJUSDT', 'BLZUSDT', 'UNIUSDT', 'AVAXUSDT', 'FTMUSDT', 'HNTUSDT', 'ENJUSDT', 'FLMUSDT', 'TOMOUSDT', 'RENUSDT', 'KSMUSDT', 'NEARUSDT', 'AAVEUSDT', 'FILUSDT', 'RSRUSDT', 'LRCUSDT', 'MATICUSDT', 'OCEANUSDT', 'CVCUSDT', 'BELUSDT', 'CTKUSDT', 'AXSUSDT', 'ALPHAUSDT', 'ZENUSDT', 'SKLUSDT', 'GRTUSDT', '1INCHUSDT', 'BTCBUSD', 'CHZUSDT', 'SANDUSDT', 'ANKRUSDT', 'BTSUSDT', 'LITUSDT', 'UNFIUSDT', 'REEFUSDT', 'RVNUSDT', 'SFPUSDT', 'XEMUSDT', 'COTIUSDT', 'CHRUSDT', 'MANAUSDT', 'ALICEUSDT', 'HBARUSDT', 'ONEUSDT', 'LINAUSDT', 'STMXUSDT', 'DENTUSDT', 'CELRUSDT', 'HOTUSDT', 'MTLUSDT', 'OGNUSDT', 'NKNUSDT', 'SCUSDT', 'DGBUSDT', '1000SHIBUSDT', 'BAKEUSDT', 'GTCUSDT', 'ETHBUSD', 'BTCDOMUSDT', 'BNBBUSD', 'ADABUSD', 'XRPBUSD', 'IOTXUSDT', 'DOGEBUSD', 'AUDIOUSDT', 'RAYUSDT', 'C98USDT', 'MASKUSDT', 'ATAUSDT', 'SOLBUSD', 'FTTBUSD', 'DYDXUSDT', '1000XECUSDT', 'GALAUSDT', 'CELOUSDT', 'ARUSDT', 'KLAYUSDT', 'ARPAUSDT', 'CTSIUSDT', 'LPTUSDT', 'ENSUSDT', 'PEOPLEUSDT', 'ANTUSDT', 'ROSEUSDT', 'DUSKUSDT', 'FLOWUSDT', 'IMXUSDT', 'API3USDT', 'GMTUSDT', 'APEUSDT', 'WOOUSDT', 'FTTUSDT', 'JASMYUSDT', 'DARUSDT', 'GALUSDT', 'AVAXBUSD', 'NEARBUSD', 'GMTBUSD', 'APEBUSD', 'GALBUSD', 'FTMBUSD', 'DODOBUSD', 'ANCBUSD', 'GALABUSD', 'TRXBUSD', '1000LUNCBUSD', 'OPUSDT', 'DOTBUSD', 'TLMBUSD', 'WAVESBUSD', 'LINKBUSD', 'SANDBUSD', 'LTCBUSD', 'MATICBUSD', 'CVXBUSD', 'FILBUSD', '1000SHIBBUSD', 'LEVERBUSD', 'ETCBUSD', 'LDOBUSD', 'UNIBUSD', 'AUCTIONBUSD', 'INJUSDT', 'STGUSDT', 'FOOTBALLUSDT', 'SPELLUSDT', '1000LUNCUSDT', 'LUNA2USDT', 'AMBBUSD', 'PHBBUSD', 'LDOUSDT', 'CVXUSDT', 'ICPUSDT', 'APTUSDT', 'QNTUSDT', 'APTBUSD', 'BLUEBIRDUSDT', 'FETUSDT', 'AGIXBUSD', 'FXSUSDT', 'HOOKUSDT', 'MAGICUSDT', 'TUSDT', 'RNDRUSDT', 'HIGHUSDT', 'MINAUSDT', 'ASTRUSDT', 'AGIXUSDT', 'PHBUSDT', 'GMXUSDT', 'CFXUSDT', 'STXUSDT', 'COCOSUSDT', 'BNXUSDT', 'ACHUSDT', 'SSVUSDT', 'CKBUSDT', 'PERPUSDT', 'TRUUSDT', 'LQTYUSDT', 'USDCUSDT', 'IDUSDT', 'ARBUSDT', 'JOEUSDT', 'TLMUSDT', 'AMBUSDT', 'LEVERUSDT', 'RDNTUSDT', 'HFTUSDT', 'XVSUSDT', 'ETHBTC', 'BLURUSDT', 'EDUUSDT', 'IDEXUSDT', 'SUIUSDT', '1000PEPEUSDT', '1000FLOKIUSDT', 'UMAUSDT', 'RADUSDT', 'KEYUSDT', 'COMBOUSDT']
+
+    coin_column_frame = ttk.Frame(coin_setup_frame, padding=10)
+    coin_column_frame.grid(row=1, column=0, padx=40, pady=10, sticky="ew")
+
+    validate_float = coin_column_frame.register(validate_float_input)
+    validate_integer = coin_column_frame.register(validate_integer_input)
+
+    coin_label = ttk.Label(coin_column_frame, text="Select Coin", background="#FFFFFF", foreground="#696B6D",
+                           font=('Helvetica', 10), width=25)
+    coin_label.grid(row=0, column=0, sticky="N")
+
+    style.configure("Treeview", background="white")
+    style.map("Treeview", background=[("selected", "blue")])
+    coin_treeview = ttk.Treeview(coin_column_frame, columns=("index", "coin"), show="headings", height=3)
+
+    coin_treeview.column("index", width=50, stretch=False)
+    coin_treeview.column("coin", width=157, stretch=False)
+
+    coin_treeview.heading("index", text="Index")
+    coin_treeview.heading("coin", text="Coin")
+
+    scrollbar = ttk.Scrollbar(coin_column_frame, orient="vertical", command=coin_treeview.yview, bootstyle="primary-round")
+    coin_treeview.configure(yscrollcommand=scrollbar.set)
+
+    coin_treeview.grid(row=0, column=1, padx=(10, 0), pady=(0, 5), sticky="ns")
+    scrollbar.grid(row=0, column=2, pady=(0, 5), sticky="ns")
+
+    for index, coin in enumerate(coins):
+        coin_treeview.insert("", "end", values=(index + 1, coin))
+
+    # coin_treeview.bind('<Double-1>', on_treeview_double_click)
+
+    style.configure("Custom.TRadiobutton", font=('Helvetica', 10))
+
+    margin_mode_label = ttk.Label(coin_column_frame, text="Margin Mode", background="#FFFFFF", foreground="#696B6D",
+                                  font=('Helvetica', 10), width=20)
+    margin_mode_label.grid(row=1, column=0, pady=10, sticky="w")
+
+    margin_mode_var = tk.StringVar(value="Isolated")
+
+    radio_frame = ttk.Frame(coin_column_frame)
+    radio_frame.grid(row=1, column=1, sticky="w")
+
+    isolated_button = ttk.Radiobutton(radio_frame, text="Isolated", variable=margin_mode_var, value="Isolated",
+                                      style="Custom.TRadiobutton")
+    isolated_button.pack(side="left", padx=10)  #
+
+    crossed_button = ttk.Radiobutton(radio_frame, text="Crossed", variable=margin_mode_var, value="Crossed",
+                                     style="Custom.TRadiobutton")
+    crossed_button.pack(side="left", padx=10)
+
+    position_cost_label = ttk.Label(coin_column_frame, text="Position Cost (%)", background="#FFFFFF", foreground="#696B6D",
+                                    font=('Helvetica', 10), width=22)
+    position_cost_label.grid(row=2, column=0, pady=10, sticky="w")
+
+    position_cost_entry = ttk.Entry(coin_column_frame, font=('Helvetica', 10), width=22,
+                                    validate="key", validatecommand=(validate_float, "%P"))
+    position_cost_entry.grid(row=2, column=1, padx=(10, 0), sticky="w")
+
+    take_profit_label = ttk.Label(coin_column_frame, text="Take Profit (%)", background="#FFFFFF", foreground="#696B6D",
+                                  font=('Helvetica', 10), width=20)
+    take_profit_label.grid(row=3, column=0, pady=10, sticky="w")
+
+    take_profit_entry = ttk.Entry(coin_column_frame, font=('Helvetica', 10), width=22,
+                                  validate="key", validatecommand=(validate_float, "%P"))
+    take_profit_entry.grid(row=3, column=1, padx=(10, 0), sticky="w")
+
+    stop_loss_label = ttk.Label(coin_column_frame, text="Stop Loss (%)", background="#FFFFFF", foreground="#696B6D",
+                                font=('Helvetica', 10), width=20)
+    stop_loss_label.grid(row=4, column=0, pady=10, sticky="w")
+
+    stop_loss_entry = ttk.Entry(coin_column_frame, font=('Helvetica', 10), width=22,
+                                validate="key", validatecommand=(validate_float, "%P"))
+    stop_loss_entry.grid(row=4, column=1, padx=(10, 0), sticky="w")
+
+    leverage_label = ttk.Label(coin_column_frame, text="Leverage", background="#FFFFFF", foreground="#696B6D",
+                               font=('Helvetica', 10), width=20)
+    leverage_label.grid(row=5, column=0, pady=10, sticky="w")
+
+    leverage_entry = ttk.Entry(coin_column_frame, font=('Helvetica', 10), width=22,
+                               validate="key", validatecommand=(validate_integer, "%P"))
+    leverage_entry.grid(row=5, column=1, padx=(10, 0), sticky="w")
+
+    save_coin_setup_btn = ttk.Button(coin_column_frame, text='Save Changes', command=save_coin_setup, bootstyle="success, outline-toolbutton", width=20)
+    save_coin_setup_btn.grid(row=7, column=0, pady=30, sticky="w")
+
+    coin_api_key_label = ttk.Label(coin_column_frame, text="API Key", background="#FFFFFF", foreground="#696B6D",
+                                   font=('Helvetica', 10), width=22)
+    coin_api_key_label.grid(row=8, column=0, pady=10, sticky="w")
+
+    coin_api_key_entry = ttk.Entry(coin_column_frame, font=('Helvetica', 10), width=22)
+    coin_api_key_entry.grid(row=8, column=1, padx=(10, 0), sticky="w")
+
+    coin_api_secret_key_label = ttk.Label(coin_column_frame, text="API Secret Key", background="#FFFFFF",
+                                          foreground="#696B6D",
+                                          font=('Helvetica', 10), width=22)
+    coin_api_secret_key_label.grid(row=9, column=0, pady=10, sticky="w")
+
+    coin_api_secret_key_entry = ttk.Entry(coin_column_frame, font=('Helvetica', 10), width=22)
+    coin_api_secret_key_entry.grid(row=9, column=1, padx=(10, 0), sticky="w")
+
+    save_api_key_btn = ttk.Button(coin_column_frame, text='Save API Key Changes', command=save_api_key,
+                                     bootstyle="info, outline-toolbutton", width=20)
+    save_api_key_btn.grid(row=10, column=0, pady=30, sticky="w")
+
+    tt_coin_treeview = ToolTip(coin_treeview, text="List of available coins", bootstyle=(PRIMARY, INVERSE))
+    tt_margin_mode_isolated = ToolTip(isolated_button, text="Choose margin mode", bootstyle=(PRIMARY, INVERSE))
+    tt_margin_mode_crossed = ToolTip(crossed_button, text="Choose margin mode", bootstyle=(PRIMARY, INVERSE))
+    tt_position_cost = ToolTip(position_cost_entry, text="Enter cost of position (in %)", bootstyle=(PRIMARY, INVERSE))
+    tt_take_profit = ToolTip(take_profit_entry, text="Enter Take Profit (in %)", bootstyle=(PRIMARY, INVERSE))
+    tt_stop_loss = ToolTip(stop_loss_entry, text="Enter Stop Loss (in %)", bootstyle=(PRIMARY, INVERSE))
+    tt_leverage = ToolTip(leverage_entry, text="Enter leverage", bootstyle=(PRIMARY, INVERSE))
+    tt_save_setup = ToolTip(save_coin_setup_btn, text="Save changes to setup", bootstyle=(SUCCESS, INVERSE))
+    tt_api_key = ToolTip(coin_api_key_entry, text="Enter API Key", bootstyle=(INFO, INVERSE))
+    tt_api_secret_key = ToolTip(coin_api_secret_key_entry, text="Enter API Secret Key", bootstyle=(INFO, INVERSE))
+    tt_save_api_key = ToolTip(save_api_key_btn, text="Save API Key changes", bootstyle=(INFO, INVERSE))
+
+    for frame in [trade_frame, history_frame, coin_setup_frame]:
+        frame.pack_forget()
+
+    style.configure(
+        "Trade_Sidebar.TLabel",
+        font=("Helvetica", 11, 'bold'),
+        padding=(60, 20),
+        foreground="#828485",
+        background="#FFFFFF")
+
+    style.configure(
+        "History_Sidebar.TLabel",
+        font=("Helvetica", 11, 'bold'),
+        padding=(60, 20),
+        foreground="#828485",
+        background="#FFFFFF")
+
+    style.configure(
+        "Coin_Setup.TLabel",
+        font=("Helvetica", 11, 'bold'),
+        padding=(60, 20),
+        foreground="#828485",
+        background="#FFFFFF")
+
+    def on_enter_trade(event):
+        style.configure("Trade_Sidebar.TLabel", background="#EBEBEB")
+        event.widget.configure(foreground="#373A3C", image=trade_icon_active)
+
+    def on_leave_trade(event):
+        style.configure("Trade_Sidebar.TLabel", background="#FFFFFF")
+        event.widget.configure(foreground="#828485", image=trade_icon_inactive)
+
+    def on_enter_history(event):
+        style.configure("History_Sidebar.TLabel", background="#EBEBEB")
+        event.widget.configure(foreground="#373A3C", image=history_icon_active)
+
+    def on_leave_history(event):
+        style.configure("History_Sidebar.TLabel", background="#FFFFFF")
+        event.widget.configure(foreground="#828485", image=history_icon_inactive)
+
+    def on_enter_coin_setup(event):
+        style.configure("Coin_Setup.TLabel", background="#EBEBEB")
+        event.widget.configure(foreground="#373A3C", image=coin_setup_icon_active)
+
+    def on_leave_coin_setup(event):
+        style.configure("Coin_Setup.TLabel", background="#FFFFFF")
+        event.widget.configure(foreground="#828485", image=coin_setup_icon_inactive)
+
+    def show_trade_frame():
+        update_trade_box()
+        show_frame(trade_frame)
+
+    def show_history_frame():
+        update_boxes()
+        show_frame(history_frame)
+
+    def show_coin_setup_frame():
+        show_frame(coin_setup_frame)
+
+    trade_label = ttk.Label(sidebar, text="Trade", style="Trade_Sidebar.TLabel", cursor="hand2")
+    trade_label.pack(fill="x")
+    trade_label.bind("<Enter>", on_enter_trade)
+    trade_label.bind("<Leave>", on_leave_trade)
+    trade_label.bind("<Button-1>", lambda event: show_trade_frame())
+    trade_label.configure(text="   Trade", image=trade_icon_inactive, compound="left")
+
+    history_label = ttk.Label(sidebar, text="History", style="History_Sidebar.TLabel", cursor="hand2")
+    history_label.pack(fill="x")
+    history_label.bind("<Enter>", on_enter_history)
+    history_label.bind("<Leave>", on_leave_history)
+    history_label.bind("<Button-1>", lambda event: show_history_frame())
+    history_label.configure(text="   History", image=history_icon_inactive, compound="left")
+
+    coin_setup_label = ttk.Label(sidebar, text="Coin Setup", style="Coin_Setup.TLabel", cursor="hand2")
+    coin_setup_label.pack(fill="x")
+    coin_setup_label.bind("<Enter>", on_enter_coin_setup)
+    coin_setup_label.bind("<Leave>", on_leave_coin_setup)
+    coin_setup_label.bind("<Button-1>", lambda event: show_coin_setup_frame())
+    coin_setup_label.configure(text="   Coin Setup", image=coin_setup_icon_inactive, compound="left")
+
+    def show_frame(frame):
+        for f in [trade_frame, history_frame, coin_setup_frame]:
+            f.pack_forget()
+        frame.pack(fill="both", expand=True)
+
+    show_frame(trade_frame)
+
+    def load_user_config():
+        global updating_programmatically
+        if authenticated_email is not None:
+            try:
+                response = requests.get(f'{url}/get_user_config', params={'email': authenticated_email})
+                data = response.json()
+
+                if data['status'] == 'success':
+                    user_config = data['user_config']
+                    api_key = user_config[4]
+                    api_secret_key = user_config[5]
+                    symbol = user_config[6]
+                    margin_mode = user_config[7]
+                    position_cost = user_config[8]
+                    tp = user_config[9]
+                    sl = user_config[10]
+                    leverage = user_config[11]
+                    turn_on_off_status = user_config[12]
+                    if turn_on_off_status == "True":
+                        turn_on_off_status = True
+                    elif turn_on_off_status == "False":
+                        turn_on_off_status = False
+                    elif turn_on_off_status == "N/A":
+                        turn_on_off_status = False
+
+                    updating_programmatically = True
+                    turn_onoff_var.set(turn_on_off_status)
+                    updating_programmatically = False
+
+                    coin_api_key_entry.delete(0, 'end')
+                    coin_api_key_entry.insert(0, api_key)
+
+                    coin_api_secret_key_entry.delete(0, 'end')
+                    coin_api_secret_key_entry.insert(0, api_secret_key)
+
+                    for item in coin_treeview.get_children():
+                        if coin_treeview.item(item, 'values')[1] == symbol:
+                            coin_treeview.selection_set(item)
+                            coin_treeview.see(item)
+                            break
+
+                    margin_mode_var.set(margin_mode)
+                    position_cost_entry.delete(0, 'end')
+                    position_cost_entry.insert(0, position_cost)
+                    take_profit_entry.delete(0, 'end')
+                    take_profit_entry.insert(0, tp)
+                    stop_loss_entry.delete(0, 'end')
+                    stop_loss_entry.insert(0, sl)
+                    leverage_entry.delete(0, 'end')
+                    leverage_entry.insert(0, leverage)
+
+                    return
+
+            except Exception as e:
+                print(f"Error getting user config: {str(e)}")
+                return
+    load_user_config()
+    root.mainloop()
+
+def save_credentials(email, license_key):
+    with open('credentials.txt', 'w') as file:
+        json.dump({"email": email, "license_key": license_key}, file)
+
+def load_credentials():
+    if os.path.exists('credentials.txt'):
+        with open('credentials.txt', 'r') as file:
+            credentials = json.load(file)
+        return credentials
+    else:
+        return None
+
+def delete_credentials():
+    if os.path.exists('credentials.txt'):
+        os.remove('credentials.txt')
+
+def show_login_screen():
+    def simplify_error_message(error_message):
+        match = re.search(r'with url: (/[^?]*)(\?|$)', error_message)
+        path = match.group(1) if match else 'Unknown path'
+        simplified_error = f"Error occurred while hitting endpoint: {path}"
+        return simplified_error
+
+    def send_heartbeat():
+        global stop_heartbeat
+        while True:
+            if stop_heartbeat:
+                break
+            time.sleep(5)
+            try:
+                license_key = license_key_entry.get()
+                requests.post(f'{url}/heartbeat', json={'license_key': license_key})
+            except Exception as e:
+                print(f"Error sending heartbeat: {e}")
+
+    def authenticate():
+        global authenticated_email
+        global stop_heartbeat
+        try:
+            email = email_var.get()
+            license_key = license_key_var.get()
+
+            response = requests.get(f'{url}/authenticate',
+                                    params={'email': email, 'license_key': license_key})
+            data = response.json()
+
+            if data['status'] == 'success':
+                if data['message'] == 'User already authenticated':
+                    return data['message']
+
+                elif data['message'] == 'User authenticated':
+                    authenticated_email = email
+                    stop_heartbeat = False
+                    threading.Thread(target=send_heartbeat).start()
+                    return data['message']
+            else:
+                if data['message'] == 'This email does not exist':
+                    stop_heartbeat = True
+                    return data['message']
+
+                if data['message'] == 'This license key does not match':
+                    stop_heartbeat = True
+                    return data['message']
+
+                if data['message'] == 'License key expired':
+                    stop_heartbeat = True
+                    return data['message']
+
+        except Exception as e:
+            simplified_error = simplify_error_message(str(e))
+            return simplified_error
+
+    def on_entry_click(event):
+        widget = event.widget
+        if widget.get() == widget.placeholder_text:
+            widget.delete(0, "end")
+
+    def on_focusout(event):
+        widget = event.widget
+        if widget.get() == '':
+            widget.insert(0, widget.placeholder_text)
+
+    def login():
+        email = email_var.get()
+        license_key = license_key_var.get()
+
+        if (
+                email != '' and email != email_entry.placeholder_text and
+                license_key != '' and license_key != license_key_entry.placeholder_text
+        ):
+            auth_message = authenticate()
+
+            if auth_message == 'User authenticated':
+                if remember_me_var.get():
+                    save_credentials(email, license_key)
+                else:
+                    delete_credentials()
+
+                Messagebox.show_info('Logged in successfully!', 'Success')
+                login_screen.withdraw()
+                show_root_screen()
+            else:
+                Messagebox.show_error(auth_message, 'Error')
+        else:
+            Messagebox.show_error('Email and license key must be entered', 'Error')
+
+    login_screen = ttk.Window(themename='cosmo')
+    login_screen.title("AlgoTech Account Login")
+    login_screen.resizable(False, False)
+    login_screen.iconbitmap(bitmap=icon_file)
+    login_screen.iconbitmap(default=icon_file)
+
+    app_width = 500
+    app_height = 350
+    screen_width = login_screen.winfo_screenwidth()
+    screen_height = login_screen.winfo_screenheight()
+    x = (screen_width / 2) - (app_width / 2)
+    y = (screen_height / 2) - (app_height / 2)
+    login_screen.geometry(f'{app_width}x{app_height}+{int(x)}+{int(y)}')
+
+    login_image = Image.open("assets/logo.png")
+    login_image_active = Image.open("assets/logo.png")
+
+    desired_size = (80, 80)
+
+    login_img = login_image.resize(desired_size, Image.ANTIALIAS)
+    login_img = ImageTk.PhotoImage(login_img)
+
+    login_img_active = login_image_active.resize(desired_size, Image.ANTIALIAS)
+    login_img_active = ImageTk.PhotoImage(login_img_active)
+
+    image_frame = ttk.Frame(login_screen)
+    image_frame.place(relx=0.5, rely=0.20, anchor='center')
+
+    login_img_label = ttk.Label(image_frame, image=login_img)
+    login_img_label.pack()
+
+    def on_enter(event):
+        login_img_label.configure(image=login_img_active)
+
+    def on_leave(event):
+        login_img_label.configure(image=login_img)
+
+    login_img_label.bind("<Enter>", on_enter)
+    login_img_label.bind("<Leave>", on_leave)
+
+    frame = ttk.Frame(login_screen)
+    frame.place(relx=0.5, rely=0.6, anchor='center')
+
+    email_var = ttk.StringVar()
+    license_key_var = ttk.StringVar()
+    remember_me_var = ttk.BooleanVar()
+
+    email_entry = ttk.Entry(frame, textvariable=email_var, width=30)
+    email_entry.placeholder_text = "Email"
+    email_entry.insert(0, email_entry.placeholder_text)
+    email_entry.bind('<FocusIn>', on_entry_click)
+    email_entry.bind('<FocusOut>', on_focusout)
+    email_entry.grid(row=1, column=0, columnspan=2, pady=10, sticky="ew")
+
+    license_key_entry = ttk.Entry(frame, textvariable=license_key_var, width=30)
+    license_key_entry.placeholder_text = "License key"
+    license_key_entry.insert(0, license_key_entry.placeholder_text)
+    license_key_entry.bind('<FocusIn>', on_entry_click)
+    license_key_entry.bind('<FocusOut>', on_focusout)
+    license_key_entry.grid(row=2, column=0, columnspan=2, pady=10, sticky="ew")
+
+    remember_me_check = ttk.Checkbutton(frame, text="Remember me", variable=remember_me_var, bootstyle="primary-round-toggle")
+    remember_me_check.grid(row=3, column=0, pady=10, sticky="ew")
+
+    log_in_button = ttk.Button(frame, text="Login", command=login, bootstyle="primary, outline-toolbutton")
+    log_in_button.grid(row=3, column=1, pady=10, sticky="ew")
+
+    credentials = load_credentials()
+    if credentials is not None:
+        remember_me_var.set(True)
+        email_entry.delete(0, "end")
+        email_entry.insert(0, credentials["email"])
+        license_key_entry.delete(0, "end")
+        license_key_entry.insert(0, credentials["license_key"])
+
+    login_screen.mainloop()
+
+async def update_history_data():
+    if authenticated_email is not None:
+        global data_trade_history
+
+        try:
+            response = requests.get(f'{url}/load_trade_history', params={'email': authenticated_email})
+            data = response.json()
+
+            if data['status'] == 'success':
+                data_trade_history = data['trade_history']
+                return
+            else:
+                if data['message'] == 'License key expired':
+                    messagebox.showerror('Error',
+                                         f'There was an error updating the history data: {data["message"]}')
+                return
+
+        except Exception as e:
+            print(f"Error loading trade history: {str(e)}")
+            return
+
+async def update_trade_data():
+    if authenticated_email is not None:
+        global data_trade_active
+
+        try:
+            response = requests.get(f'{url}/get_active_trade', params={'email': authenticated_email})
+            data = response.json()
+
+            if data['status'] == 'success':
+                data_trade_active = data['active_trade']
+                return
+            else:
+                data_trade_active = None
+                if data['message'] == 'License key expired':
+                    messagebox.showerror('Error',
+                                         f'There was an error updating the trade data: {data["message"]}')
+                return
+
+        except Exception as e:
+            print(f"Error getting active trade: {str(e)}")
+            return
+
+async def task_update_data():
+    while True:
+        await asyncio.sleep(1)
+        await update_history_data()
+        await update_trade_data()
+
+async def main_coroutine():
+    new_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(new_loop)
+
+    task = asyncio.create_task(task_update_data())
+    await asyncio.gather(task)
+
+def main():
+    def start_asyncio_loop():
+        asyncio.run(main_coroutine())
+
+    threading.Thread(target=start_asyncio_loop).start()
+
+    show_login_screen()
+
+if __name__ == "__main__":
+    main()
+
